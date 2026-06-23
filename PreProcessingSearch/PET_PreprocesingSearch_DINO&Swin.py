@@ -1,30 +1,3 @@
-"""
-PET Preprocessing Comparison — Swin-V2 & DINOv2
-=================================================
-
-Tests top 12 PET preprocessing recipes (including raw baseline) on
-Swin Transformer V2-Base and DINOv2 ViT-B/14.
-
-Mirrors the MRI version exactly — same model configs, same training loop,
-same 5-epoch fast-validation strategy.
-
-Top recipes selected from PET VGG-19 grid search (test_su_roc):
-   1. C03_bilateral                    0.9917
-   2. E08_gaussian_minmax              0.9903
-   3. P07_background_mask              0.9903  [PET-specific]
-   4. P08_suv_clip_clahe               0.9903  [PET-specific]
-   5. B04_minmax                       0.9890
-   6. G02_gamma_dark_zscore            0.9862
-   7. H05_gamma_dark_bilateral_zscore  0.9848
-   8. E07_bilateral_minmax             0.9834
-   9. B03_zscore                       0.9821
-  10. P04_jet_colormap                 0.9807  [PET-specific]
-  11. P06_percentile_stretch           0.9793  [PET-specific]
-  12. A01_raw (baseline)               0.9779
-
-Runs 5 epochs per recipe (fast validation, not full training).
-Results show if transformers need different preprocessing than CNNs.
-"""
 
 import os
 import time
@@ -59,12 +32,14 @@ if torch.cuda.is_available():
 # ══════════════════════════════════════════════════════════════
 # CONFIG
 # ══════════════════════════════════════════════════════════════
-OUT_DIR    = "/hdd3/seecs/abubakar.seecs/adni/output_PET_search_dino-swin/"
-SPLIT_CSV  = "/hdd3/seecs/abubakar.seecs/adni/splits/pet_backbone_splits.csv"
+OUT_DIR    = ""   # folder where results, checkpoints, and plots will be saved
+SPLIT_CSV  = ""   # path to pet_backbone_splits.csv
 
-# Path remapping (adjust if running on different machine)
-OLD_PATH_PREFIX = "/hdd3/seecs/abubakar.seecs/adni/datasets/"
-NEW_PATH_PREFIX = "/hdd3/seecs/abubakar.seecs/adni/datasets/"
+# Path remapping: if absolute paths baked into the CSV differ from your machine,
+# set OLD_PATH_PREFIX to the original prefix and NEW_PATH_PREFIX to the current one.
+# Leave both empty if paths are already correct.
+OLD_PATH_PREFIX = ""
+NEW_PATH_PREFIX = ""
 
 os.makedirs(OUT_DIR, exist_ok=True)
 
