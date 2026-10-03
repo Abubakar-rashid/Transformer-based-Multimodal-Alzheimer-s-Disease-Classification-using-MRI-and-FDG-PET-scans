@@ -1,6 +1,6 @@
 # Alzheimer's Classification — MRI × PET Multimodal Pipeline
 
-Binary classification of **Alzheimer's Disease (AD) vs. Cognitively Normal (CN)** subjects using 2D brain slices extracted from MRI and PET scans. Five deep learning architectures are compared under a common 3-stage training protocol.
+Binary classification of **Alzheimer's Disease (AD) vs. Cognitively Normal (CN)** subjects using 2D brain slices extracted from MRI and PET scans. Six backbone architectures are compared; the final cross-architecture MLP fusion experiments are in `fusion/`.
 
 ---
 
@@ -21,7 +21,7 @@ Binary classification of **Alzheimer's Disease (AD) vs. Cognitively Normal (CN)*
 
 ## Overview
 
-Each model follows the same **3-stage pipeline**:
+Each single-backbone model follows the same **3-stage pipeline**:
 
 | Stage | Description |
 |-------|-------------|
@@ -29,203 +29,149 @@ Each model follows the same **3-stage pipeline**:
 | **Stage 2** | Train a PET backbone independently on PET slices |
 | **Stage 3** | Freeze both backbones; train a fusion MLP on paired MRI × PET slices |
 
-All splits are **subject-level** — no subject appears in more than one of train / val / test — to prevent data leakage. Evaluation is reported at both **slice level** and **subject level** (majority-vote aggregation across all slices belonging to a subject).
+The `fusion/` package extends this to **all 36 cross-architecture pairs** (30 heterogeneous + 6 homogeneous) using 5-fold CV × 5 random seeds = 25 runs per pair.
+
+All splits are **subject-level** — no subject appears in more than one of train / val / test — to prevent data leakage.
 
 ---
 
 ## Repository Structure
 
 ```
-Alzheimers Classification/
-│
-├── splits/                         # Pre-computed subject-level split CSVs
-│   ├── mri_backbone_splits.csv
+.
+├── Subject_splits/                 # Pre-computed subject-level split CSVs
+│   ├── mri_backbone_splits.csv     # backbone training (all subjects)
 │   ├── pet_backbone_splits.csv
-│   ├── mri_fusion_splits.csv
+│   ├── mri_fusion_splits.csv       # 150 overlap subjects (MRI ∩ PET)
 │   └── pet_fusion_splits.csv
 │
-├── vgg/                            # Standard pretrained VGG19
-│   ├── config.py
-│   ├── data.py
-│   ├── model.py
-│   ├── train.py
-│   ├── inference.py
-│   ├── plots.py
-│   └── main.py
-│
-├── vgg_sepconv/                    # VGG19 with depthwise-separable convolutions
-│   ├── config.py
-│   ├── data.py
-│   ├── model.py
-│   ├── train.py
-│   ├── inference.py
-│   ├── plots.py
-│   └── main.py
-│
-├── vgg_ghost/                      # VGG19 with Ghost convolutions
-│   ├── config.py
-│   ├── data.py
-│   ├── model.py
-│   ├── train.py
-│   ├── inference.py
-│   ├── plots.py
-│   └── main.py
-│
-├── dino_v2/                        # DINOv2 ViT-B/14 (HPO-tuned)
-│   ├── config.py
-│   ├── data.py
-│   ├── model.py
-│   ├── train.py
-│   ├── inference.py
-│   ├── plots.py
-│   └── main.py
-│
+├── vgg/                            # VGG19 backbone
+├── dino_v2/                        # DINOv2 ViT-B/14
 ├── swin/                           # Swin Transformer V2-Base
-│   ├── config.py
-│   ├── data.py
-│   ├── model.py
-│   ├── train.py
-│   ├── inference.py
-│   ├── plots.py
-│   └── main.py
+├── vit/                            # ViT-B/16
+├── convnext/                       # ConvNeXtV2-Tiny
+├── mambaout/                       # MambaOut-Base
+│   (each folder: config.py  data.py  model.py  train.py  inference.py  plots.py  main.py)
 │
+├── fusion/                         # Cross-architecture MLP fusion (all 36 pairs)
+│   ├── __init__.py
+│   ├── config.py                   # ⚠ Kaggle paths — adapt before running locally
+│   ├── data.py
+│   ├── models.py
+│   ├── train.py
+│   ├── baselines.py
+│   ├── stats.py
+│   ├── plots.py
+│   └── run_fusion.py
+│
+├── PreProcessingSearch/            # Preprocessing hyperparameter search notebooks
 ├── requirements.txt
 └── README.md
 ```
 
-Each model folder is a **self-contained Python package**. All imports are sibling-relative (e.g. `from config import DEVICE`), so each `main.py` must be run from inside its own folder.
+Each single-backbone folder is **self-contained** — all imports are sibling-relative (`from config import DEVICE`), so `main.py` must be run from inside that folder.
 
 ---
 
 ## Models
 
-### `vgg/` — VGG19 (pretrained)
-Standard VGG19 loaded with ImageNet weights (`VGG19_Weights.IMAGENET1K_V1`). The classifier head is replaced with a two-layer dense block. Optimiser: **Adam**, lr = 5e-5, 8 epochs.
-
-### `vgg_sepconv/` — VGG19 + Separable Convolutions
-All 3×3 convolutions in VGG19 are replaced with **depthwise-separable** convolutions (depthwise 3×3 + pointwise 1×1) plus BatchNorm. Trained from random initialisation. Same optimiser and schedule as `vgg/`.
-
-### `vgg_ghost/` — VGG19 + Ghost Convolutions
-All 3×3 convolutions replaced with **GhostConv** blocks (cheap 1×1 primary + depthwise secondary branch, concatenated). Weights warm-started by copying the centre pixel of each pretrained VGG19 3×3 kernel into the 1×1 primary branch. Same optimiser and schedule as `vgg/`.
+### `vgg/` — VGG19
+Pretrained VGG19 (`VGG19_Weights.IMAGENET1K_V1`). Classifier head replaced with a 2-layer dense block. Optimiser: **Adam**, lr = 5×10⁻⁵, 8 epochs, patience 5.
 
 ### `dino_v2/` — DINOv2 ViT-B/14
-Backbone loaded via `torch.hub` (`facebookresearch/dinov2`, `dinov2_vitb14`). A lightweight projection head sits on top of the [CLS] token (dim = 768). Hyperparameters were found via **Optuna HPO** separately for MRI, PET, and the fusion head. Optimiser: **AdamW** with linear warmup + cosine decay, 15 epochs.
+Backbone loaded via `torch.hub` (`facebookresearch/dinov2`, `dinov2_vitb14`). Projection head on top of the [CLS] token (768 → 256). Hyperparameters found via Optuna HPO. Optimiser: **AdamW** with linear warmup + cosine decay, 15 epochs, patience 7.
 
 ### `swin/` — Swin Transformer V2-Base
-`torchvision.models.swin_v2_b` pretrained at 256×256. The classification head is replaced with a dense block on top of the 1024-dim pooled feature vector. Optimiser: **AdamW** with linear warmup + cosine decay, 15 epochs.
+`torchvision.models.swin_v2_b` pretrained at 256×256. Dense block on the 1024-dim pooled feature. Optimiser: **AdamW** with linear warmup + cosine decay, 15 epochs, patience 7.
+
+### `vit/` — ViT-B/16
+`timm` ViT-B/16 (ImageNet-1K, 224×224). CLS token (768-dim) → dense block. Optimiser: **AdamW** with linear warmup + cosine decay, lr = 1×10⁻⁴, WD = 0.05, 15 epochs, patience 7.
+
+### `convnext/` — ConvNeXtV2-Tiny
+`timm` ConvNeXtV2-Tiny (FCMAE pre-trained, fine-tuned on ImageNet-22K+1K). GAP → dense block. Optimiser: **AdamW**, lr = 5×10⁻⁵, 8 epochs, patience 5.
+
+### `mambaout/` — MambaOut-Base
+`timm` MambaOut-Base (ImageNet-1K). Spatial average of feature map → dense block. Optimiser: **AdamW**, lr = 5×10⁻⁵, 8 epochs, patience 5.
+
+### `fusion/` — Cross-Architecture MLP Fusion
+Frozen backbone features (from the 6 trained backbones above) are concatenated and passed to a shallow MLP head (256 → 64 → 2, BatchNorm, Dropout). Evaluated over all 36 MRI×PET architecture pairs using 5-fold CV × 5 seeds. Optimiser: **AdamW**, lr = 1×10⁻³, WD = 1×10⁻⁴, 60 epochs, early stopping on val loss (patience 15).
+
+> **Note**: The `fusion/config.py` contains Kaggle-specific paths (`/kaggle/input/...`, `/kaggle/working/...`). Before running locally, edit `SPLIT_DIR`, `MRI_CSV`, `PET_CSV`, `OLD_PFX`, `NEW_PFX`, `CACHE_DIR`, and the `*_DIR` output paths.
 
 ---
 
 ## Dataset
 
-The experiments use **2D axial slices** extracted from ADNI (Alzheimer's Disease Neuroimaging Initiative) structural MRI and PET scans. Each slice is saved as a PNG image.
+The experiments use **2D coronal slices** extracted from ADNI (Alzheimer's Disease Neuroimaging Initiative) structural MRI and FDG-PET scans. Each slice is saved as a PNG image.
 
 Expected on-disk layout:
 
 ```
 <dataset_root>/
 ├── MRI_Slices/
-│   ├── AD/
-│   │   ├── <subject_id>/
-│   │   │   ├── slice_001.png
-│   │   │   └── ...
-│   │   └── ...
-│   └── CN/
-│       ├── <subject_id>/
-│       │   └── ...
-│       └── ...
+│   ├── AD/<subject_id>/*.png
+│   └── CN/<subject_id>/*.png
 └── PET_Slices/
-    ├── AD/
-    │   └── ...
-    └── CN/
-        └── ...
+    ├── AD/<subject_id>/*.png
+    └── CN/<subject_id>/*.png
 ```
 
-> **Access**: ADNI data requires registration and approval at [adni.loni.usc.edu](https://adni.loni.usc.edu). This repository does not distribute any imaging data.
+> **Access**: ADNI data requires registration at [adni.loni.usc.edu](https://adni.loni.usc.edu). This repository does not distribute any imaging data.
 
 ---
 
 ## Pre-computed Splits
 
-The `splits/` folder contains four CSV files that encode the subject-level train / val / test partition used across all experiments. Using the same splits ensures fair comparison between models.
+The `Subject_splits/` folder contains four CSVs encoding the subject-level partitions.
 
-| File | Used by |
-|------|---------|
-| `mri_backbone_splits.csv` | MRI backbone training (Stages 1 of all models) |
-| `pet_backbone_splits.csv` | PET backbone training (Stages 2 of all models) |
-| `mri_fusion_splits.csv`   | MRI side of the fusion dataset (Stage 3) |
-| `pet_fusion_splits.csv`   | PET side of the fusion dataset (Stage 3) |
+| File | Subjects | Used by |
+|------|----------|---------|
+| `mri_backbone_splits.csv` | ~348 | MRI backbone training (Stage 1) |
+| `pet_backbone_splits.csv` | ~500 | PET backbone training (Stage 2) |
+| `mri_fusion_splits.csv`   | 150 | MRI side of 5-fold fusion CV |
+| `pet_fusion_splits.csv`   | 150 | PET side of 5-fold fusion CV |
 
-**CSV schema** (minimum required columns):
+**CSV columns**: `subject_id`, `group` (AD/CN), `slice_path`, `split` (train/val/test).
 
-| Column | Description |
-|--------|-------------|
-| `subject_id` | Unique subject identifier |
-| `filepath` | Absolute path to the slice PNG |
-| `label` | Class label (`AD` or `CN`) |
-| `split` | Partition assignment (`train`, `val`, or `test`) |
-
-If your slice files live at different absolute paths than what is recorded in the CSVs (e.g. you downloaded them to a different machine), use the `OLD_DATA_ROOT` / `NEW_DATA_ROOT` remapping fields in each model's `config.py` — see [Configuration](#configuration).
-
-The fusion CSVs cover only the **overlap subjects** that have both MRI and PET data available, so the subject counts will be smaller than the backbone CSVs.
+If slice paths in the CSVs differ from your machine, use `OLD_DATA_ROOT` / `NEW_DATA_ROOT` in each `config.py` to remap them.
 
 ---
 
 ## Installation
 
 ```bash
-# 1. Clone the repository
 git clone <repo-url>
-cd "Alzheimers Classification"
-
-# 2. Create and activate a virtual environment (recommended)
+cd "Transformer-based-Multimodal-Alzheimer-s-Disease-Classification-using-MRI-and-FDG-PET-scans"
 python -m venv venv
-# Windows
-venv\Scripts\activate
-# Linux / macOS
-source venv/bin/activate
-
-# 3. Install dependencies
+# Windows: venv\Scripts\activate   |   Linux/macOS: source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-> **PyTorch with CUDA**: the `requirements.txt` installs the CPU-only wheel by default on some platforms. For GPU support install the appropriate CUDA build from [pytorch.org](https://pytorch.org/get-started/locally/) before running `pip install -r requirements.txt`.
+> **PyTorch + CUDA**: install the CUDA wheel from [pytorch.org](https://pytorch.org/get-started/locally/) before `pip install -r requirements.txt`.
 
-### DINOv2 — internet access required (first run only)
+> **DINOv2**: `dino_v2/model.py` downloads ~330 MB from GitHub on first run via `torch.hub`.
 
-`dino_v2/model.py` loads the backbone via `torch.hub.load("facebookresearch/dinov2", ...)`. On the first run this downloads ~330 MB from the internet and caches it in `~/.cache/torch/hub/`. Subsequent runs use the local cache.
+> **timm models**: `vit/`, `convnext/`, and `mambaout/` download pretrained weights from HuggingFace Hub on first run. An internet connection is required.
 
 ---
 
 ## Configuration
 
-Every model has a `config.py` that you **must edit before running**. The path variables are intentionally left empty so no private paths are committed to the repository.
-
-### VGG variants (`vgg/`, `vgg_sepconv/`, `vgg_ghost/`)
+### Single-backbone models (`vgg/`, `vit/`, `convnext/`, `mambaout/`)
 
 ```python
-# config.py
-
-OUT_DIR   = "/path/to/output"   # where .pth checkpoints and plots are saved
-SPLIT_DIR = "/path/to/splits"   # folder containing the four split CSVs
-
-# Only needed if the file paths inside the CSVs differ from your machine:
-OLD_DATA_ROOT = ""   # original prefix (leave empty if not needed)
-NEW_DATA_ROOT = ""   # replacement prefix (leave empty if not needed)
+# config.py — edit these before running
+OUT_DIR       = "/path/to/output"    # checkpoints + plots
+SPLIT_DIR     = "/path/to/Subject_splits"
+OLD_DATA_ROOT = ""                   # original path prefix in the CSVs
+NEW_DATA_ROOT = ""                   # replacement prefix on this machine
 ```
 
 ### DINOv2 (`dino_v2/`)
 
 ```python
-# config.py
-
-BASE      = "/path/to/dataset"              # dataset root
-MRI_DIR   = "/path/to/dataset/MRI_Slices"
-PET_DIR   = "/path/to/dataset/PET_Slices"
-OUT_DIR   = "/path/to/output"
-SPLIT_DIR = "/path/to/splits"
-
-# Only needed if CSV paths differ from current machine:
+OUT_DIR         = "/path/to/output"
+SPLIT_DIR       = "/path/to/Subject_splits"
 OLD_PATH_PREFIX = ""
 NEW_PATH_PREFIX = ""
 ```
@@ -233,78 +179,75 @@ NEW_PATH_PREFIX = ""
 ### Swin (`swin/`)
 
 ```python
-# config.py
-
-BASE    = "/path/to/dataset"
-MRI_DIR = "/path/to/dataset/MRI_Slices"
-PET_DIR = "/path/to/dataset/PET_Slices"
-OUT_DIR = "/path/to/output"   # split CSVs are also read from / written to OUT_DIR
+OUT_DIR = "/path/to/output"   # split CSVs are read from a separate SPLIT_DIR variable
 ```
 
-> The Swin model reads its split CSVs from `OUT_DIR` (not a separate `SPLIT_DIR`) because it was originally designed to generate and save splits at runtime in the same output directory.
+### Fusion (`fusion/config.py`)
+
+All paths are Kaggle-specific. At minimum replace:
+- `SPLIT_DIR` / `MRI_CSV` / `PET_CSV` → point to local `Subject_splits/`
+- `OLD_PFX` → original path prefix in the CSVs
+- `NEW_PFX` → local dataset root
+- `CACHE_DIR`, `CROSS_DIR`, `SAME_DIR`, `SOLO_DIR`, `BASE_DIR`, `STATS_DIR` → local output directories
+- Checkpoint constants (`VGG19_MRI_CKPT`, etc.) → paths to your trained `.pth` files
 
 ---
 
 ## Reproducing Experiments
 
-Each model is run independently by executing its `main.py` **from inside the model's folder**:
+### Single-backbone models
+
+Run each `main.py` from **inside** its own folder (sibling-relative imports require this):
 
 ```bash
-# Example: run the standard VGG19 experiment
-cd vgg
-python main.py
+cd vgg      && python main.py
+cd ../swin  && python main.py
+cd ../dino_v2 && python main.py
+cd ../vit   && python main.py
+cd ../convnext && python main.py
+cd ../mambaout && python main.py
 ```
 
-Repeat for each model:
+### Cross-architecture MLP fusion
+
+After editing `fusion/config.py`, run from the **repository root**:
 
 ```bash
-cd ../vgg_sepconv && python main.py
-cd ../vgg_ghost   && python main.py
-cd ../dino_v2     && python main.py
-cd ../swin        && python main.py
+python -m fusion.run_fusion
 ```
 
-> The modules use **sibling-relative imports** (`from config import ...`). Running `python vgg/main.py` from the parent directory will fail with an `ImportError`. Always `cd` into the model folder first.
+This runs all 4 phases in sequence:
+1. Feature caching (extract and save frozen backbone features)
+2. MLP training for all 36 pairs (5-fold CV × 5 seeds)
+3. Baseline evaluation (LR stacking, probability averaging, solo LR)
+4. Statistical analysis
 
-### Expected runtime (approximate, single A100 GPU)
-
-| Model | Stage 1 (MRI) | Stage 2 (PET) | Stage 3 (Fusion) |
-|-------|---------------|---------------|------------------|
-| VGG19 variants | ~15 min | ~15 min | ~20 min |
-| DINOv2 | ~40 min | ~40 min | ~30 min |
-| Swin V2-B | ~35 min | ~35 min | ~30 min |
+Set `SKIP_TRAINING = True` in `fusion/config.py` to skip phases 1–3 and rerun only the statistics on existing CSVs.
 
 ---
 
 ## Evaluation Metrics
 
-Results are reported at two granularities:
-
 | Level | Method |
 |-------|--------|
-| **Slice-level** | Each 2D slice is treated as an independent sample |
-| **Subject-level** | Softmax probabilities are averaged across all slices of a subject; the argmax is the subject prediction |
+| **Slice-level** | Each 2D slice treated as an independent sample |
+| **Subject-level** | Softmax probabilities averaged across all slices; argmax = prediction |
 
-Metrics reported for each level:
-
-- **Accuracy**
-- **ROC-AUC** (one-vs-rest, AD as positive class)
-- **PR-AUC** (area under precision-recall curve)
-
-A summary table is printed at the end of each `main.py` run, and per-subject predictions are saved to a CSV in `OUT_DIR`.
+Metrics reported: Accuracy, ROC-AUC, PR-AUC, sensitivity, specificity, F1.
 
 ---
 
 ## Output Files
 
-After a successful run each model saves the following to `OUT_DIR`:
+Single-backbone runs save to `OUT_DIR`:
 
 | File | Description |
 |------|-------------|
-| `mri_<model>_best.pth` | Best MRI backbone checkpoint (by val accuracy) |
+| `mri_<model>_best.pth` | Best MRI backbone checkpoint |
 | `pet_<model>_best.pth` | Best PET backbone checkpoint |
-| `multimodal_<model>_best.pth` | Best fusion model checkpoint |
-| `multimodal_<model>_final.pth` | Final fusion model state dict |
-| `*_curves.png` | Training / validation loss & accuracy curves |
-| `*_roc_pr.png` | ROC and Precision-Recall curves |
-| `*_subject_predictions.csv` | Per-subject predicted label, true label, and mean probability |
+| `multimodal_best.pth` | Best fusion checkpoint |
+| `*_curves.png` | Train/val loss and accuracy curves |
+| `*_roc_pr.png` | ROC and PR curves |
+| `*_subject_predictions.csv` | Per-subject predictions |
+
+Fusion runs save to the directories specified in `fusion/config.py` (`CROSS_DIR`, `SAME_DIR`, `SOLO_DIR`, `BASE_DIR`, `STATS_DIR`).

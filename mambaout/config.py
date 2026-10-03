@@ -1,4 +1,3 @@
-import os
 import random
 import numpy as np
 import torch
@@ -26,14 +25,16 @@ OLD_DATA_ROOT = ""
 NEW_DATA_ROOT = ""
 
 CFG = dict(
-    lr          = 5e-5,
-    batch_size  = 64,
-    epochs      = 8,
-    patience    = 5,
-    dropout     = 0.5,
-    dense_units = 128,
-    num_classes = 2,
-    img_size    = 224,
+    lr            = 5e-5,
+    weight_decay  = 1e-4,
+    batch_size    = 64,
+    epochs        = 8,
+    patience      = 5,
+    dropout       = 0.3,
+    dense_units   = 256,
+    num_classes   = 2,
+    img_size      = 224,
+    warmup_epochs = 2,
 )
 
 LABEL_MAP = {"AD": 1, "CN": 0}

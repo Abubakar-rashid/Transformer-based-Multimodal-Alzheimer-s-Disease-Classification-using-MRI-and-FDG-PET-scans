@@ -15,7 +15,7 @@ def plot_curves(history, name):
     ax2.plot(e, history["val_loss"],   label="Val")
     ax2.set_title(f"{name} — Loss"); ax2.legend()
     plt.tight_layout()
-    plt.savefig(os.path.join(OUT_DIR, f"ghost_{name}_curves.png"), dpi=150)
+    plt.savefig(os.path.join(OUT_DIR, f"{name}_curves.png"), dpi=150)
     plt.show()
 
 
@@ -30,5 +30,5 @@ def plot_roc_pr(labels, probs, name):
     ax2.plot(rec, prec, lw=2, label=f"AUC={pr_auc:.3f}")
     ax2.set_title(f"PR — {name}"); ax2.legend()
     plt.tight_layout()
-    plt.savefig(os.path.join(OUT_DIR, f"ghost_{name}_roc_pr.png"), dpi=150)
+    plt.savefig(os.path.join(OUT_DIR, f"{name}_roc_pr.png"), dpi=150)
     plt.show()

@@ -5,9 +5,20 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+from torch.optim.lr_scheduler import LambdaLR
 from sklearn.metrics import classification_report, roc_curve, auc, precision_recall_curve
 
 from config import DEVICE, OUT_DIR, IDX2LABEL
+
+
+def get_warmup_cosine_scheduler(optimizer, warmup_epochs, total_epochs):
+    """Linear warmup for warmup_epochs, then cosine annealing — stabilises Swin attention."""
+    def lr_lambda(current_epoch):
+        if current_epoch < warmup_epochs:
+            return float(current_epoch + 1) / float(warmup_epochs)
+        progress = (current_epoch - warmup_epochs) / max(1, total_epochs - warmup_epochs)
+        return max(0.0, 0.5 * (1.0 + np.cos(np.pi * progress)))
+    return LambdaLR(optimizer, lr_lambda)
 
 
 def train_one_epoch(model, loader, optimizer, criterion, device, multimodal=False):
@@ -105,9 +116,13 @@ def print_results(name, sl_preds, sl_labels, sl_probs, subjects):
 
 
 def fit(model, loaders, save_path, name,
-        lr, epochs, patience, device, multimodal=False):
+        lr, epochs, patience, device,
+        weight_decay=0.05, warmup_epochs=3,
+        multimodal=False):
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    scheduler = get_warmup_cosine_scheduler(optimizer, warmup_epochs, epochs)
+
     best_val_acc, no_improve = 0.0, 0
     history = {"train_loss": [], "val_loss": [],
                "train_acc":  [], "val_acc":  []}
@@ -117,6 +132,9 @@ def fit(model, loaders, save_path, name,
             model, loaders["train"], optimizer, criterion, device, multimodal)
         va_loss, va_acc, _, _, _, _ = evaluate(
             model, loaders["val"], criterion, device, multimodal)
+
+        scheduler.step()
+        current_lr = optimizer.param_groups[0]["lr"]
 
         history["train_loss"].append(tr_loss)
         history["val_loss"].append(va_loss)
@@ -137,7 +155,8 @@ def fit(model, loaders, save_path, name,
 
         print(f"  [{name}] Ep {epoch:02d}/{epochs} | "
               f"Train {tr_acc:.4f} ({tr_loss:.4f}) | "
-              f"Val {va_acc:.4f} ({va_loss:.4f}){saved}")
+              f"Val {va_acc:.4f} ({va_loss:.4f}) | "
+              f"LR {current_lr:.2e}{saved}")
 
     model.load_state_dict(torch.load(save_path, map_location=device))
     return model, history
