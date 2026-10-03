@@ -53,7 +53,8 @@ class Extractor(nn.Module):
             self.feat_dim = 4096
         elif arch == "vitb16":
             self.m = timm.create_model("vit_base_patch16_224", pretrained=False, num_classes=0)
-            st = {k: v for k, v in _load_st(ckpt).items() if not k.startswith("head")}
+            st = {(k[9:] if k.startswith("backbone.") else k): v
+                  for k, v in _load_st(ckpt).items() if not k.startswith("head")}
             self.m.load_state_dict(st, strict=False)
             self.feat_dim = self.m.num_features
         elif arch == "dino":
@@ -75,12 +76,14 @@ class Extractor(nn.Module):
             self.feat_dim = self.m.num_features
         elif arch == "convnext":
             self.m = timm.create_model("convnextv2_tiny", pretrained=False, num_classes=0)
-            st = {k: v for k, v in _load_st(ckpt).items() if not k.startswith("head")}
+            st = {(k[9:] if k.startswith("backbone.") else k): v
+                  for k, v in _load_st(ckpt).items() if not k.startswith("head")}
             self.m.load_state_dict(st, strict=False)
             self.feat_dim = self.m.num_features
         elif arch == "mambaout":
             self.m = timm.create_model("mambaout_base", pretrained=False, num_classes=0)
-            st = {k: v for k, v in _load_st(ckpt).items() if not k.startswith("head")}
+            st = {(k[9:] if k.startswith("backbone.") else k): v
+                  for k, v in _load_st(ckpt).items() if not k.startswith("head")}
             self.m.load_state_dict(st, strict=False)
             self.feat_dim = self.m.num_features
         else:
